@@ -1,6 +1,7 @@
 """SQLAlchemy ORM models. Import every model here so Alembic can discover them."""
 
 from app.models.instrument import Instrument
+from app.models.market_data import MarketDataset, PriceBar
 from app.models.user import User
 
-__all__ = ["Instrument", "User"]
+__all__ = ["Instrument", "MarketDataset", "PriceBar", "User"]
