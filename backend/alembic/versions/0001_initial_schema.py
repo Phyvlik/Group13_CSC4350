@@ -21,7 +21,7 @@ UUID_DEFAULT = sa.text("gen_random_uuid()")
 
 user_role = sa.Enum("TRADER", "ADMIN", name="user_role")
 account_status = sa.Enum("ACTIVE", "SUSPENDED", "DEACTIVATED", name="account_status")
-session_status = sa.Enum("ACTIVE", "COMPLETED", "ABANDONED", name="session_status")
+session_status = sa.Enum("ACTIVE", "PAUSED", "COMPLETED", "ABANDONED", name="session_status")
 trade_side = sa.Enum("BUY", "SELL", name="trade_side")
 metric_code = sa.Enum("PNL", "WIN_RATE", "EXPOSURE", "LOSS_CHASING", name="metric_code")
 

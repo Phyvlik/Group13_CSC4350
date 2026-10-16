@@ -14,6 +14,7 @@ class AccountStatus(str, enum.Enum):
 
 class SessionStatus(str, enum.Enum):
     ACTIVE = "ACTIVE"
+    PAUSED = "PAUSED"
     COMPLETED = "COMPLETED"
     ABANDONED = "ABANDONED"
 
