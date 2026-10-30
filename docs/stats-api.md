@@ -73,6 +73,42 @@ numbers. Stored values use the schema's `Numeric(18,6)` range, rounded to six
 decimal places with `ROUND_HALF_EVEN`; overflow is rejected. Ratios range from
 0 to 1. `win_rate` and `exposure_ratio` may be null. Timestamps are UTC.
 
+## Current overall statistics
+
+### `GET /stats/summary`
+
+Calculate current totals from only the authenticated user's sessions and
+revealed trades. This does not read, combine, or write historical metric
+revisions. Results are grouped by quote currency; currencies are never added
+together and no exchange-rate conversion is assumed. A user without sessions
+receives `{"currencies": []}` with 200.
+
+```json
+{
+  "currencies": [
+    {
+      "quote_currency": "USD",
+      "session_count": 2,
+      "pnl": "15.000000",
+      "win_rate": "0.5",
+      "closed_trades": 2,
+      "winning_trades": 1,
+      "position_value": "2000.000000000000",
+      "equity": "20000.000000000000",
+      "exposure_ratio": "0.1"
+    }
+  ]
+}
+```
+
+The aggregate win rate is total winning SELL fills divided by total SELL
+fills, rather than an average of session percentages. Aggregate exposure is
+total position value divided by total equity within the currency. If any
+open position lacks a visible price, that currency's `position_value`,
+`equity`, and `exposure_ratio` are all null. A zero equity denominator also
+produces a null ratio. Current calculations use 38-digit Decimal precision;
+their strings are not restricted to the six-decimal storage scale.
+
 ## Proposed calculation rules
 
 - **P/L:** sum each SELL's recorded realized P/L, subtract every BUY/SELL fee

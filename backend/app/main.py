@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
-from app.routers import health, stats
+from app.routers import health, stats, stats_summary
 
 settings = get_settings()
 
@@ -18,3 +18,4 @@ app.add_middleware(
 
 app.include_router(health.router)
 app.include_router(stats.router)
+app.include_router(stats_summary.router)
