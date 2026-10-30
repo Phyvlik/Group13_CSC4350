@@ -1,4 +1,8 @@
-"""Draft calculation helpers for FR-12/FR-13 and issue #12."""
+"""Draft calculation helpers for FR-12/FR-13 and issue #12.
+
+Decimal arithmetic uses the caller's current decimal context. Monetary
+precision and rounding for storage/display require a shared team policy.
+"""
 
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -69,6 +73,45 @@ def calculate_stats(trades: Iterable[TradeInput]) -> TradeStats:
         closed_trades += 1
         if realized > 0:
             winning_trades += 1
+
+    win_rate = (
+        Decimal(winning_trades) / Decimal(closed_trades)
+        if closed_trades
+        else None
+    )
+    return TradeStats(pnl, win_rate, closed_trades, winning_trades)
+
+
+def calculate_overall_stats(sessions: Iterable[TradeStats]) -> TradeStats:
+    """Combine session results using total trade counts for the win rate.
+
+    Session P/L already includes fees, so it is summed without deducting fees
+    again. The counts determine the overall win rate; individual session win
+    rates are not averaged. With no closed trades, win_rate is None.
+
+    The caller must supply each session once, scoped to the intended user,
+    using the same currency and calculation rules for every session.
+    Input records are not modified; the iterable is consumed in one pass.
+    This helper does not query, save, round for storage, or verify metrics.
+    """
+    pnl = Decimal("0")
+    closed_trades = 0
+    winning_trades = 0
+
+    for session in sessions:
+        _validate_decimal(session.pnl, "session pnl")
+        # Exact int checks also reject bool, which is an int subclass.
+        if (
+            type(session.closed_trades) is not int
+            or type(session.winning_trades) is not int
+        ):
+            raise TypeError("Session trade counts must be integers.")
+        if not 0 <= session.winning_trades <= session.closed_trades:
+            raise ValueError("Session trade counts are invalid.")
+
+        pnl += session.pnl
+        closed_trades += session.closed_trades
+        winning_trades += session.winning_trades
 
     win_rate = (
         Decimal(winning_trades) / Decimal(closed_trades)
