@@ -6,8 +6,9 @@ precision and rounding for storage/display require a shared team policy.
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from decimal import Decimal
-from typing import Literal
+from decimal import Decimal, ROUND_HALF_EVEN, localcontext
+from typing import Literal, Protocol
+from uuid import UUID
 
 
 @dataclass(frozen=True)
@@ -119,3 +120,110 @@ def calculate_overall_stats(sessions: Iterable[TradeStats]) -> TradeStats:
         else None
     )
     return TradeStats(pnl, win_rate, closed_trades, winning_trades)
+
+
+@dataclass(frozen=True)
+class ExposureStats:
+    position_value: Decimal | None
+    equity: Decimal | None
+    exposure_ratio: Decimal | None
+
+
+@dataclass(frozen=True)
+class SessionStats:
+    trades: TradeStats
+    exposure: ExposureStats
+
+
+class SessionSource(Protocol):
+    session_id: UUID
+    cash_balance: Decimal
+    position_quantity: Decimal
+    price: Decimal | None
+    quote_currency: str
+    trades: tuple[TradeInput, ...]
+
+
+@dataclass(frozen=True)
+class CurrencyStats:
+    quote_currency: str
+    session_count: int
+    pnl: Decimal
+    win_rate: Decimal | None
+    closed_trades: int
+    winning_trades: int
+    position_value: Decimal | None
+    equity: Decimal | None
+    exposure_ratio: Decimal | None
+
+
+def calculate_exposure(
+    cash_balance: Decimal, position_quantity: Decimal, price: Decimal | None
+) -> ExposureStats:
+    """Proposed current exposure for long-only, unleveraged practice accounts.
+
+    Position value = quantity * latest visible close; equity = cash + value.
+    Exposure is position value / equity (a ratio, not a loss forecast).
+    Missing price for an open position or zero equity gives an undefined
+    ratio. A flat position needs no price. Team approval is still required.
+    Arithmetic uses a local 38-digit context without modifying the caller's.
+    """
+    for name, value in (("cash_balance", cash_balance), ("position_quantity", position_quantity)):
+        _validate_decimal(value, name)
+        if value < 0:
+            raise ValueError(f"{name} cannot be negative for a long-only account.")
+    if price is not None:
+        _validate_decimal(price, "price")
+        if price <= 0:
+            raise ValueError("price must be positive.")
+    if position_quantity and price is None:
+        return ExposureStats(None, None, None)
+    with localcontext() as context:
+        context.prec = 38
+        context.rounding = ROUND_HALF_EVEN
+        value = position_quantity * price if position_quantity else Decimal("0")
+        equity = cash_balance + value
+        return ExposureStats(value, equity, value / equity if equity else None)
+
+
+def calculate_snapshot_stats(snapshot: SessionSource) -> SessionStats:
+    """Calculate one bounded session snapshot using deterministic precision."""
+    with localcontext() as context:
+        context.prec = 38
+        context.rounding = ROUND_HALF_EVEN
+        return SessionStats(
+            calculate_stats(snapshot.trades),
+            calculate_exposure(snapshot.cash_balance, snapshot.position_quantity, snapshot.price),
+        )
+
+
+def calculate_summary(snapshots: Iterable[SessionSource]) -> list[CurrencyStats]:
+    """Group current snapshots by currency; weight win rate and exposure.
+
+    Never add different currencies or average individual ratios. If any open
+    position lacks a visible price, the currency's exposure stays undefined.
+    Each session must appear once. Memory is proportional to session count.
+    """
+    groups: dict[str, list[SessionStats]] = {}
+    seen: set[UUID] = set()
+    for snapshot in snapshots:
+        if snapshot.session_id in seen:
+            raise ValueError("A session cannot occur twice in a summary.")
+        seen.add(snapshot.session_id)
+        groups.setdefault(snapshot.quote_currency, []).append(calculate_snapshot_stats(snapshot))
+
+    result = []
+    with localcontext() as context:
+        context.prec = 38
+        context.rounding = ROUND_HALF_EVEN
+        for currency, sessions in sorted(groups.items()):
+            trades = calculate_overall_stats(session.trades for session in sessions)
+            complete = all(session.exposure.position_value is not None for session in sessions)
+            value = sum((session.exposure.position_value for session in sessions), Decimal("0")) if complete else None
+            equity = sum((session.exposure.equity for session in sessions), Decimal("0")) if complete else None
+            result.append(CurrencyStats(
+                currency, len(sessions), trades.pnl, trades.win_rate,
+                trades.closed_trades, trades.winning_trades, value, equity,
+                value / equity if equity else None,
+            ))
+    return result
