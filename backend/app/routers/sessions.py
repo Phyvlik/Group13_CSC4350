@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
 from app.db.session import get_db
+from app.models.enums import SessionStatus
 from app.models.user import User
 from app.schemas.replay import (
     CreateSessionRequest,
@@ -55,6 +56,27 @@ def create_session(
         db=db,
         user_id=current_user.user_id,
         payload=payload,
+    )
+
+
+@router.get(
+    "/sessions",
+    response_model=list[SessionOut],
+    tags=["sessions"],
+    summary="List practice replay sessions for the current user",
+)
+def list_sessions(
+    status: SessionStatus | None = None,
+    limit: int | None = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """List all sessions belonging to the logged-in user, newest first."""
+    return ReplayService.list_sessions(
+        db=db,
+        user_id=current_user.user_id,
+        status=status,
+        limit=limit,
     )
 
 

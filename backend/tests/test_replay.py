@@ -333,6 +333,10 @@ def test_session_endpoints_scoped_to_logged_in_user(db, client, client_user_2, s
     assert client_user_2.patch(f"/sessions/{user1_session_id}", json={"replay_speed": 2.0}).status_code == 404
     assert client_user_2.get(f"/trades/{trade1.trade_id}/outcome").status_code == 404
 
+    # GET /sessions for user 2 does not list user 1's session
+    user2_sessions = client_user_2.get("/sessions").json()
+    assert not any(s["session_id"] == user1_session_id for s in user2_sessions)
+
 
 def test_no_response_including_errors_ever_contains_future_bars(db, client, user_1, sample_dataset):
     """Tests confirm that no response, including error responses, ever contains a bar after replay_at."""
@@ -412,7 +416,9 @@ def test_unauthenticated_requests_rejected(sample_dataset):
 
     raw_client = TestClient(app)
     assert raw_client.get("/datasets").status_code == 401
+    assert raw_client.get("/sessions").status_code == 401
     assert raw_client.post("/sessions", json={}).status_code == 401
+    assert raw_client.get(f"/sessions/{uuid.uuid4()}").status_code == 401
     assert raw_client.get(f"/sessions/{uuid.uuid4()}/bars").status_code == 401
     assert raw_client.post(f"/sessions/{uuid.uuid4()}/step", json={}).status_code == 401
     assert raw_client.patch(f"/sessions/{uuid.uuid4()}", json={}).status_code == 401
@@ -447,4 +453,65 @@ def test_trade_outcome_not_found(client):
     """GET /trades/{id}/outcome returns 404 for non-existent trade."""
     res = client.get(f"/trades/{uuid.uuid4()}/outcome")
     assert res.status_code == 404
+
+
+def test_get_sessions_list_for_user(client, sample_dataset):
+    """GET /sessions returns all sessions belonging to the user, ordered by started_at desc."""
+    # Initially user has no sessions
+    res0 = client.get("/sessions")
+    assert res0.status_code == 200
+    assert res0.json() == []
+
+    # Create session 1
+    res1 = client.post(
+        "/sessions",
+        json={
+            "dataset_id": str(sample_dataset.dataset_id),
+            "period_start": "2024-01-01T10:00:00Z",
+            "period_end": "2024-01-01T10:04:00Z",
+            "initial_cash": 10000,
+        },
+    )
+    assert res1.status_code == 201
+    s1_id = res1.json()["session_id"]
+
+    # Create session 2
+    res2 = client.post(
+        "/sessions",
+        json={
+            "dataset_id": str(sample_dataset.dataset_id),
+            "period_start": "2024-01-01T10:01:00Z",
+            "period_end": "2024-01-01T10:05:00Z",
+            "initial_cash": 20000,
+        },
+    )
+    assert res2.status_code == 201
+    s2_id = res2.json()["session_id"]
+
+    # Fetch sessions list
+    res_list = client.get("/sessions")
+    assert res_list.status_code == 200
+    data = res_list.json()
+    assert len(data) == 2
+    # Newest first
+    assert data[0]["session_id"] == s2_id
+    assert data[1]["session_id"] == s1_id
+
+    # Filter by status
+    # Pause session 1
+    client.patch(f"/sessions/{s1_id}", json={"status": "PAUSED"})
+
+    paused_list = client.get("/sessions?status=PAUSED").json()
+    assert len(paused_list) == 1
+    assert paused_list[0]["session_id"] == s1_id
+
+    active_list = client.get("/sessions?status=ACTIVE").json()
+    assert len(active_list) == 1
+    assert active_list[0]["session_id"] == s2_id
+
+    # Test limit
+    limited_list = client.get("/sessions?limit=1").json()
+    assert len(limited_list) == 1
+    assert limited_list[0]["session_id"] == s2_id
+
 

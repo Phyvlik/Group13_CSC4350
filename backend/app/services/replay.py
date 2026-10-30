@@ -90,6 +90,26 @@ class ReplayService:
         return session
 
     @staticmethod
+    def list_sessions(
+        db: Session,
+        user_id: uuid.UUID,
+        status: SessionStatus | None = None,
+        limit: int | None = None,
+    ) -> Sequence[PracticeSession]:
+        """List all replay sessions for a user, ordered newest first."""
+        stmt = (
+            select(PracticeSession)
+            .where(PracticeSession.user_id == user_id)
+            .order_by(PracticeSession.started_at.desc())
+        )
+        if status is not None:
+            stmt = stmt.where(PracticeSession.status == status)
+        if limit is not None:
+            stmt = stmt.limit(limit)
+
+        return db.scalars(stmt).all()
+
+    @staticmethod
     def get_session(
         db: Session,
         session_id: uuid.UUID,
