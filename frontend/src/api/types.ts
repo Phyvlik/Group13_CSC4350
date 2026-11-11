@@ -7,6 +7,7 @@ export interface Bar {
 }
 
 export interface Instrument {
+  id: string; // dataset id; one instrument can have several datasets
   sym: string;
   name: string;
   from: string;
@@ -77,6 +78,7 @@ export interface FeedbackData {
 }
 
 export interface Dataset {
+  id: string;
   sym: string;
   range: string;
   status: string;
@@ -85,4 +87,12 @@ export interface Dataset {
 export interface Usage {
   activeSessions: number;
   datasets: number;
+}
+
+export interface AdminUser {
+  id: string;
+  name: string;
+  email: string;
+  role: "Trader" | "Admin";
+  status: "Active" | "Disabled";
 }

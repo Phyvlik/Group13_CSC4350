@@ -12,7 +12,7 @@ export default function NewSessionPage() {
 
   if (loadError) return <ErrorPanel message={loadError} />;
   if (!instruments) return <Loading />;
-  const chosen = instruments.find((i) => i.sym === sym);
+  const chosen = instruments.find((i) => i.id === sym);
 
   const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -24,7 +24,7 @@ export default function NewSessionPage() {
     if (!start || !end) return setError("Enter both a start and an end date.");
     if (start >= end) return setError("The end date must be after the start date.");
     try {
-      const created = await api.createSession({ sym, start, end });
+      const created = await api.createSession({ datasetId: sym, start, end });
       navigate(`/replay/${created.id}`);
     } catch (x) {
       setError(x instanceof Error ? x.message : "Could not start the session.");
@@ -40,7 +40,7 @@ export default function NewSessionPage() {
           <select id="i" value={sym} onChange={(e) => setSym(e.target.value)}>
             <option value="">Select an instrument</option>
             {instruments.map((i) => (
-              <option key={i.sym} value={i.sym}>
+              <option key={i.id} value={i.id}>
                 {i.sym} - {i.name}
               </option>
             ))}
