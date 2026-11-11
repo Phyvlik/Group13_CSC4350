@@ -1,6 +1,8 @@
+import jwt
 import pytest
 from fastapi.testclient import TestClient
 
+from app.core.config import get_settings
 from app.core.security import hash_password, verify_password
 from app.db.session import get_db
 from app.main import app
@@ -179,5 +181,15 @@ def test_me_with_only_x_user_id_header_returns_401(anon_client):
     user_id = register(anon_client).json()["user"]["id"]
 
     response = anon_client.get("/auth/me", headers={"X-User-Id": user_id})
+
+    assert response.status_code == 401
+
+
+def test_me_with_token_missing_exp_returns_401(anon_client):
+    user_id = register(anon_client).json()["user"]["id"]
+    settings = get_settings()
+    token = jwt.encode({"sub": user_id}, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+
+    response = anon_client.get("/auth/me", headers=auth_header(token))
 
     assert response.status_code == 401
