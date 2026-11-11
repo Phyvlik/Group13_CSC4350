@@ -21,10 +21,18 @@ from sqlalchemy.pool import StaticPool
 def _contract_tables():
     metadata = MetaData()
     amount = Numeric(18, 6)
+    # Every column the shared User model reads, so get_current_user can load the row.
     Table(
         "users", metadata,
         Column("user_id", Uuid, primary_key=True),
+        Column("email", String(255), nullable=False, unique=True,
+               default=lambda: f"{uuid4().hex}@example.com"),
+        Column("password_hash", String(255), nullable=False, default="not-a-real-hash"),
+        Column("display_name", String(100), nullable=False, default="Stats Tester"),
+        Column("role", String, nullable=False, default="TRADER"),
         Column("account_status", String, nullable=False, default="ACTIVE"),
+        Column("created_at", DateTime(timezone=True), nullable=False,
+               default=lambda: datetime.now(timezone.utc)),
     )
     Table(
         "instruments", metadata,

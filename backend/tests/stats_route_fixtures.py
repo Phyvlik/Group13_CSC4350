@@ -1,10 +1,12 @@
 """Shared HTTP test fixtures; no production tables or credentials are created."""
 
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
 import jwt
 from fastapi.testclient import TestClient
 
+from app.core.auth import create_access_token
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.main import app
@@ -29,16 +31,20 @@ class StatsRouteTestCase(StatsDatabaseTestCase):
         self.addCleanup(restore_overrides)
         app.dependency_overrides[get_db] = lambda: self.db
         app.dependency_overrides[get_settings] = lambda: self.settings
+        # The shared get_current_user reads settings directly, so sign and verify with the test secret.
+        settings_patch = patch("app.core.auth.get_settings", return_value=self.settings)
+        settings_patch.start()
+        self.addCleanup(settings_patch.stop)
         self.client = TestClient(app)
         self.addCleanup(self.client.close)
 
     def token(self, *, subject=None, claims=None, algorithm="HS256", secret=None):
-        payload = {
+        if claims is None and algorithm == "HS256" and secret is None:
+            return create_access_token(self.user if subject is None else subject)
+        payload = claims if claims is not None else {
             "sub": str(self.user if subject is None else subject),
             "exp": datetime.now(timezone.utc) + timedelta(hours=1),
         }
-        if claims is not None:
-            payload = claims
         return jwt.encode(
             payload, secret or self.settings.jwt_secret_key, algorithm=algorithm
         )
