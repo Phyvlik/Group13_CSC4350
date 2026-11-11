@@ -1,15 +1,18 @@
 # Epoch API Contract
 
-This is the single reference for every backend endpoint the frontend can call. It is written from the code on these branches as of 2026-10-29:
+This is the single reference for every backend endpoint the frontend can call. It is written from the integrated code on `release/integration` as of 2026-11-11:
 
-| Area | Branch | PR |
+| Area | Original branch | PR |
 |---|---|---|
 | Health | `main` | merged |
 | Auth | `feature/6-auth` | #19 |
-| Datasets, replay sessions, trade outcomes | `feature/replay-engine` | not opened yet |
+| Datasets, replay sessions, trade outcomes | `feature/replay-engine` | #22 |
+| Paper trading | `feature/paper-trading` | in the integration PR |
+| Market data import | `feature/7-market-data` | #21 |
 | Statistics | `feature/12-stats` | #17 |
+| Admin users and datasets | `release/integration` | integration PR |
 
-If an endpoint changes in one of those branches, update this file in the same PR.
+If an endpoint changes, update this file in the same PR.
 
 ## Authentication
 
@@ -21,9 +24,9 @@ Authorization: Bearer <access_token>
 
 - Get a token from `POST /auth/register` or `POST /auth/login` (the `access_token` field).
 - Tokens are signed with HS256 using `JWT_SECRET_KEY`. Claims: `sub` (user id as a UUID string), `iat`, and `exp` (default 60 minutes, set by `JWT_ACCESS_TOKEN_EXPIRE_MINUTES`). There is no refresh token yet, so the client logs in again when it expires.
-- A missing, malformed, or expired token, or a user that is not `ACTIVE`, returns **401** with `WWW-Authenticate: Bearer`.
-- **Dev only:** the shared `get_current_user` dependency also accepts an `X-User-Id: <uuid>` header when no Bearer token is sent. It will be removed before release. Do not use it in frontend code. The statistics endpoints do not accept it.
-- The statistics endpoints use their own token check (`stats_auth.py`) until it is merged with the shared one. It also returns **503** if `JWT_SECRET_KEY` is still the template value or shorter than 32 bytes. Set a real secret in `.env` locally.
+- A missing, malformed, or expired token, a token without `exp` or `sub`, or a user that is not `ACTIVE`, returns **401** with `WWW-Authenticate: Bearer`.
+- Every protected endpoint, statistics included, uses the same `get_current_user` dependency in `app/core/auth.py`. There is no header-based bypass: the old dev-only `X-User-Id` header is no longer accepted.
+- Endpoints under `/admin` also require `role` to be `Admin`, otherwise **403**. Create the first admin with `python scripts/create_admin.py` (see the README).
 
 ## Conventions
 
@@ -224,6 +227,20 @@ Starts a replay session. `replay_at` starts at `period_start`.
 | 404 | Dataset not found |
 | 422 | `initial_cash` is 0 or negative, or a field is missing or malformed |
 
+### GET /sessions
+
+Lists the signed-in user's sessions, newest first.
+
+| | |
+|---|---|
+| Auth | Bearer |
+| Query | `status` (optional, one of the session statuses), `limit` (optional) |
+| Response 200 | `Session[]` |
+
+| Error | When |
+|---|---|
+| 401 | Missing or invalid token |
+
 ### GET /sessions/{id}
 
 | | |
@@ -326,9 +343,61 @@ Reveals the price movement after a trade. The trade must have a journal entry fi
 
 ---
 
+## Paper trading
+
+Simulated orders inside a practice session. Fills happen at the close of the latest bar at or before `replay_at`; the client never sends a price. Cash, position, and average cost are updated in the same transaction as the trade row (the session row is locked with `SELECT ... FOR UPDATE` on PostgreSQL).
+
+### POST /sessions/{id}/trades
+
+| | |
+|---|---|
+| Auth | Bearer |
+| Request body | `{ "side": "BUY", "quantity": "10", "fee": "0" }`. `side` is `BUY` or `SELL`. `quantity` must be greater than 0. `fee` is optional (default 0) and cannot be negative. |
+| Response 201 | `Trade` (below) |
+
+```json
+{
+  "trade_id": "uuid",
+  "session_id": "uuid",
+  "side": "SELL",
+  "quantity": "10.000000",
+  "execution_price": "153.250000",
+  "fee": "0.000000",
+  "realized_pnl": "12.500000",
+  "placed_at": "2024-01-01T10:03:00Z",
+  "outcome_revealed_at": null
+}
+```
+
+`realized_pnl` is set on SELLs (proceeds minus average cost minus fee) and `null` on BUYs. `placed_at` is the session's `replay_at` at the time of the order, not the wall clock.
+
+| Error | When |
+|---|---|
+| 400 | Session already ended, no bar at the replay position, not enough cash for a BUY, or selling more than the open position |
+| 401 | Missing or invalid token |
+| 404 | Session not found or owned by another user |
+| 422 | `side` invalid, `quantity` 0 or negative, or `fee` negative |
+
+### GET /sessions/{id}/trades
+
+Lists the session's trades, oldest first.
+
+| | |
+|---|---|
+| Auth | Bearer |
+| Request body | None |
+| Response 200 | `Trade[]` |
+
+| Error | When |
+|---|---|
+| 401 | Missing or invalid token |
+| 404 | Session not found or owned by another user |
+
+---
+
 ## Statistics
 
-All endpoints in this section require a Bearer token and do not accept `X-User-Id`. Values are decimal strings and can be `null` when a metric is undefined (for example no closed trades).
+All endpoints in this section require a Bearer token. Values are decimal strings and can be `null` when a metric is undefined (for example no closed trades).
 
 ### POST /sessions/{session_id}/stats/recompute
 
@@ -361,7 +430,7 @@ Calculates, verifies, and saves a new statistics revision for the session.
 | 401 | Missing or invalid token, or the user is not active |
 | 404 | Session not found or owned by another user |
 | 409 | Session data cannot produce valid statistics, or a concurrent change conflicted. Retry after resolving. |
-| 503 | Token verification is not configured (see Authentication) or the database is unavailable |
+| 503 | The database is unavailable |
 
 ### GET /sessions/{session_id}/stats
 
@@ -378,7 +447,7 @@ Returns the latest saved, verified revision. This is a snapshot as of `computed_
 | 401 | Missing or invalid token, or the user is not active |
 | 404 | Session not found or owned by another user |
 | 409 | No verified statistics yet. Call `POST .../stats/recompute` first. |
-| 503 | Token verification is not configured or the database is unavailable |
+| 503 | The database is unavailable |
 
 ### GET /stats/summary
 
@@ -412,7 +481,124 @@ Current totals across all of the user's sessions, grouped by quote currency. Cur
 |---|---|
 | 401 | Missing or invalid token, or the user is not active |
 | 409 | Session data cannot produce valid statistics |
-| 503 | Token verification is not configured or the database is unavailable |
+| 503 | The database is unavailable |
+
+---
+
+## Admin
+
+Every endpoint here needs a Bearer token for a user whose `role` is `Admin`. Anyone else gets **401** (no or bad token) or **403** (signed in but not an admin).
+
+### POST /admin/market-data/import
+
+Fetches OHLC bars from Twelve Data and stores them as a dataset. Needs `TWELVE_DATA_API_KEY` in `.env`. Twelve Data returns at most 5000 bars per request, so larger ranges are fetched in several requests (each starting at the last bar received) and stitched together without duplicates. Re-importing the same symbol, exchange, interval, and range reuses the dataset and only inserts bars that are missing.
+
+| | |
+|---|---|
+| Auth | Bearer, admin |
+| Request body | `{ "symbol": "AAPL", "exchange": "NASDAQ", "interval": "1day", "start": "2024-01-02T00:00:00Z", "end": "2024-06-28T00:00:00Z" }` |
+| Response 201 | New dataset created (body below) |
+| Response 200 | Dataset already existed; only missing bars were added |
+
+`interval` is one of `1min`, `5min`, `15min`, `30min`, `45min`, `1h`, `2h`, `4h`, `1day`, `1week`, `1month`. `symbol` and `exchange` are upper-cased.
+
+```json
+{
+  "dataset_id": "uuid",
+  "instrument_id": "uuid",
+  "symbol": "AAPL",
+  "exchange": "NASDAQ",
+  "provider": "twelvedata",
+  "interval": "1day",
+  "version": "1",
+  "range_start": "2024-01-02T00:00:00Z",
+  "range_end": "2024-06-28T00:00:00Z",
+  "created": true,
+  "bars_inserted": 124,
+  "bars_skipped": 0
+}
+```
+
+| Error | When |
+|---|---|
+| 401 / 403 | Not signed in / not an admin |
+| 404 | Twelve Data returned no bars for the range |
+| 409 | A concurrent import of the same range inserted rows first. Retry. |
+| 422 | Unknown interval, blank symbol or exchange, or `start` not before `end` |
+| 502 | Twelve Data could not be reached or returned an error |
+| 503 | `TWELVE_DATA_API_KEY` is not set |
+
+### GET /admin/users
+
+Lists every account, oldest first (FR-21).
+
+| | |
+|---|---|
+| Auth | Bearer, admin |
+| Request body | None |
+| Response 200 | `User[]` |
+
+### PATCH /admin/users/{id}
+
+Changes another account's role or status (FR-21). A disabled account cannot log in, and tokens it already holds stop working.
+
+| | |
+|---|---|
+| Auth | Bearer, admin |
+| Request body | `{ "role": "Admin", "status": "Disabled" }`. Send either field or both. `role` is `Trader` or `Admin`; `status` is `Active` or `Disabled`. |
+| Response 200 | `User` |
+
+| Error | When |
+|---|---|
+| 400 | An admin tried to demote or disable their own account |
+| 401 / 403 | Not signed in / not an admin |
+| 404 | User not found |
+| 422 | Neither field sent, or a value is not allowed |
+
+### GET /admin/datasets
+
+Lists stored datasets, newest import first, with how many bars each holds and how many practice sessions use it (FR-20).
+
+| | |
+|---|---|
+| Auth | Bearer, admin |
+| Request body | None |
+| Response 200 | See below |
+
+```json
+[
+  {
+    "dataset_id": "uuid",
+    "instrument_id": "uuid",
+    "symbol": "DEMO",
+    "exchange": "SIM",
+    "provider": "generated",
+    "interval": "1day",
+    "version": "1",
+    "range_start": "2023-01-02T00:00:00Z",
+    "range_end": "2024-11-29T00:00:00Z",
+    "imported_at": "2026-11-11T16:00:00Z",
+    "bar_count": 500,
+    "session_count": 2
+  }
+]
+```
+
+### DELETE /admin/datasets/{id}
+
+Deletes a dataset and its bars (FR-20). Refused while any practice session uses the dataset, so no session ever loses its data.
+
+| | |
+|---|---|
+| Auth | Bearer, admin |
+| Request body | None |
+| Response 204 | Deleted, no body |
+
+| Error | When |
+|---|---|
+| 401 / 403 | Not signed in / not an admin |
+| 404 | Dataset not found |
+| 409 | One or more practice sessions use the dataset |
 
 ---
 
@@ -427,11 +613,19 @@ Current totals across all of the user's sessions, grouped by quote currency. Cur
 | PATCH | /auth/me | Bearer | feature/6-auth |
 | GET | /datasets | Bearer | feature/replay-engine |
 | POST | /sessions | Bearer | feature/replay-engine |
+| GET | /sessions | Bearer | feature/replay-engine |
 | GET | /sessions/{id} | Bearer | feature/replay-engine |
 | GET | /sessions/{id}/bars | Bearer | feature/replay-engine |
 | POST | /sessions/{id}/step | Bearer | feature/replay-engine |
 | PATCH | /sessions/{id} | Bearer | feature/replay-engine |
 | GET | /trades/{id}/outcome | Bearer | feature/replay-engine |
+| POST | /sessions/{id}/trades | Bearer | feature/paper-trading |
+| GET | /sessions/{id}/trades | Bearer | feature/paper-trading |
 | POST | /sessions/{session_id}/stats/recompute | Bearer | feature/12-stats |
 | GET | /sessions/{session_id}/stats | Bearer | feature/12-stats |
 | GET | /stats/summary | Bearer | feature/12-stats |
+| POST | /admin/market-data/import | Bearer, admin | feature/7-market-data |
+| GET | /admin/users | Bearer, admin | release/integration |
+| PATCH | /admin/users/{id} | Bearer, admin | release/integration |
+| GET | /admin/datasets | Bearer, admin | release/integration |
+| DELETE | /admin/datasets/{id} | Bearer, admin | release/integration |
