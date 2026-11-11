@@ -1,14 +1,14 @@
 """Current statistics grouped by the authenticated user's quote currencies."""
 
 from decimal import Decimal
-from uuid import UUID
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.core.stats_auth import get_stats_user_id
+from app.core.auth import get_current_user
 from app.db.session import get_db
+from app.models.user import User
 from app.repositories.stats import load_user_sessions
 from app.routers.stats import DecimalResponse, translate_errors
 from app.services.stats import calculate_summary
@@ -35,9 +35,9 @@ class SummaryStatsResponse(BaseModel):
 
 @router.get("/stats/summary", response_model=SummaryStatsResponse)
 def get_summary_stats(
-    user_id: UUID = Depends(get_stats_user_id),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Calculate current totals without combining different currencies."""
     with translate_errors(db):
-        return {"currencies": calculate_summary(load_user_sessions(db, user_id))}
+        return {"currencies": calculate_summary(load_user_sessions(db, current_user.user_id))}

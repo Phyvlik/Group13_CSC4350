@@ -11,8 +11,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_valid
 from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
 from sqlalchemy.orm import Session
 
-from app.core.stats_auth import get_stats_user_id
+from app.core.auth import get_current_user
 from app.db.session import get_db
+from app.models.user import User
 from app.repositories.stats import SessionNotFound
 from app.services.stats_storage import (
     StatsConflict,
@@ -76,12 +77,12 @@ def translate_errors(db: Session) -> Iterator[None]:
 @router.get("/sessions/{session_id}/stats", response_model=SessionStatsResponse)
 def get_session_stats(
     session_id: UUID,
-    user_id: UUID = Depends(get_stats_user_id),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Read the latest saved, verified snapshot as of its computation time."""
     with translate_errors(db):
-        return read_verified_stats(db, user_id, session_id)
+        return read_verified_stats(db, current_user.user_id, session_id)
 
 
 @router.post(
@@ -89,11 +90,11 @@ def get_session_stats(
 )
 def post_session_stats(
     session_id: UUID,
-    user_id: UUID = Depends(get_stats_user_id),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Explicitly calculate, verify and persist a new statistics revision."""
     with translate_errors(db):
-        result = recompute_session_stats(db, user_id, session_id)
+        result = recompute_session_stats(db, current_user.user_id, session_id)
         db.commit()
         return result
