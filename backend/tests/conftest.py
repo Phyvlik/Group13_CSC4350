@@ -116,6 +116,35 @@ def client_user_2(db, user_2):
 
 
 @pytest.fixture
+def admin_user(db):
+    """Active admin account."""
+    user = User(
+        user_id=uuid.uuid4(),
+        email=f"admin_{uuid.uuid4().hex[:6]}@example.com",
+        password_hash="secret_hash",
+        display_name="Admin",
+        role=UserRole.ADMIN,
+        account_status=AccountStatus.ACTIVE,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@pytest.fixture
+def admin_client(db, admin_user):
+    """TestClient authenticated as admin_user."""
+
+    def override_get_db():
+        yield db
+
+    app.dependency_overrides[get_db] = override_get_db
+    yield TestClient(app, headers={"Authorization": f"Bearer {create_access_token(admin_user.user_id)}"})
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
 def sample_dataset(db, user_1):
     """Sample dataset with an instrument and 6 chronological price bars."""
     instrument = Instrument(

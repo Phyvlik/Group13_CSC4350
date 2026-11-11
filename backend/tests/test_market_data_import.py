@@ -1,18 +1,14 @@
-import uuid
 from datetime import datetime, timezone
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from app.core.auth import create_access_token
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.main import app
-from app.models.enums import AccountStatus, UserRole
 from app.models.instrument import Instrument
 from app.models.market_data import MarketDataset, PriceBar
-from app.models.user import User
 from app.services import twelve_data
 
 IMPORT_BODY = {
@@ -51,32 +47,6 @@ def twelve_data_api(monkeypatch):
         lambda: httpx.Client(base_url="https://api.twelvedata.com", transport=httpx.MockTransport(handler)),
     )
     return state
-
-
-@pytest.fixture
-def admin_user(db):
-    user = User(
-        user_id=uuid.uuid4(),
-        email=f"admin_{uuid.uuid4().hex[:6]}@example.com",
-        password_hash="secret_hash",
-        display_name="Admin",
-        role=UserRole.ADMIN,
-        account_status=AccountStatus.ACTIVE,
-    )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    return user
-
-
-@pytest.fixture
-def admin_client(db, admin_user):
-    def override_get_db():
-        yield db
-
-    app.dependency_overrides[get_db] = override_get_db
-    yield TestClient(app, headers={"Authorization": f"Bearer {create_access_token(admin_user.user_id)}"})
-    app.dependency_overrides.clear()
 
 
 def test_non_admin_gets_403(client, db, twelve_data_api):
