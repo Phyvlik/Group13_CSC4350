@@ -2,7 +2,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
-from app.routers import auth, health, sessions, trades
+from app.routers import admin, auth, health, sessions, trades
+from app.routers import admin, auth, health, sessions, trades
 
 settings = get_settings()
 
@@ -20,3 +21,4 @@ app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(sessions.router)
 app.include_router(trades.router)
+app.include_router(admin.router)
