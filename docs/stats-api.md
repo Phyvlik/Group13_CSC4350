@@ -1,4 +1,4 @@
-# Statistics API proposal — issue #12
+# Statistics API proposal: issue #12
 
 This implements FR-12/FR-13 statistics and the verified-statistics portion of
 NFR-9. It uses the team's `practice_sessions`, `trades`, `price_bars`,
