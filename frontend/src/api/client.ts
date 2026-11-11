@@ -83,7 +83,8 @@ interface AdminDatasetOut {
   session_count: number;
 }
 
-const day = (iso: string) => iso.slice(0, 10);
+// Parse first so any UTC offset the server sends is applied before taking the calendar day.
+const day = (iso: string) => new Date(iso).toISOString().slice(0, 10);
 const ratioToPct = (v: Num | null) => (v == null ? null : Number(v) * 100);
 const live = (s: SessionOut) => s.status === "ACTIVE" || s.status === "PAUSED";
 
@@ -128,7 +129,7 @@ async function replayState(id: string): Promise<ReplayState> {
   const position = Number(session.position_quantity);
   const lastClose = bars.length ? bars[bars.length - 1].close : 0;
   // The API never says how many future bars exist (that would leak the future), only whether the period is over.
-  const finished = !live(session) || session.replay_at >= session.period_end;
+  const finished = !live(session) || Date.parse(session.replay_at) >= Date.parse(session.period_end);
   return {
     session: {
       id: session.session_id,
