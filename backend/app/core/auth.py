@@ -3,7 +3,7 @@ import uuid
 from typing import Annotated
 
 import jwt
-from fastapi import Depends, Header, HTTPException, Security, status
+from fastapi import Depends, HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
@@ -33,48 +33,35 @@ def create_access_token(subject: str | uuid.UUID, expires_delta: timedelta | Non
 
 def get_current_user(
     auth: Annotated[HTTPAuthorizationCredentials | None, Security(security)] = None,
-    x_user_id: Annotated[str | None, Header(alias="X-User-Id")] = None,
     db: Session = Depends(get_db),
 ) -> User:
     """FastAPI dependency resolving the authenticated User or raising HTTP 401."""
-    user_id: uuid.UUID | None = None
-
-    if auth and auth.credentials:
-        settings = get_settings()
-        try:
-            payload = jwt.decode(
-                auth.credentials,
-                settings.jwt_secret_key,
-                algorithms=[settings.jwt_algorithm],
-            )
-            sub = payload.get("sub")
-            if not sub:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Invalid token payload",
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
-            user_id = uuid.UUID(sub)
-        except (jwt.PyJWTError, ValueError):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Could not validate credentials",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-    elif x_user_id:
-        # DEV ONLY: the X-User-Id header skips token checks so local tools can act as a user.
-        # Remove this fallback before release.
-        try:
-            user_id = uuid.UUID(x_user_id)
-        except ValueError:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid user ID format in X-User-Id header",
-            )
-    else:
+    if not auth or not auth.credentials:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication credentials were not provided",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    settings = get_settings()
+    try:
+        payload = jwt.decode(
+            auth.credentials,
+            settings.jwt_secret_key,
+            algorithms=[settings.jwt_algorithm],
+        )
+        sub = payload.get("sub")
+        if not sub:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token payload",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        user_id = uuid.UUID(sub)
+    except (jwt.PyJWTError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
