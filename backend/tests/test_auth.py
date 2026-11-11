@@ -173,3 +173,11 @@ def test_patch_me_password_requires_current_password(anon_client):
 
     assert missing.status_code == 422
     assert wrong.status_code == 400
+
+
+def test_me_with_only_x_user_id_header_returns_401(anon_client):
+    user_id = register(anon_client).json()["user"]["id"]
+
+    response = anon_client.get("/auth/me", headers={"X-User-Id": user_id})
+
+    assert response.status_code == 401
