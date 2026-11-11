@@ -1,10 +1,16 @@
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.permissions import require_admin
 from app.db.session import get_db
+from app.models.enums import AccountStatus, UserRole
 from app.models.user import User
+from app.schemas.admin import UpdateUserRequest
+from app.schemas.auth import UserOut
 from app.schemas.market_data import MarketDataImportRequest, MarketDataImportResponse
 from app.services.market_data_import import NoBarsReturned, import_market_data
 from app.services.twelve_data import TwelveDataError, TwelveDataNotConfigured
@@ -41,3 +47,41 @@ def import_market_data_route(
     if not result.created:
         response.status_code = status.HTTP_200_OK
     return result
+
+
+@router.get("/users", response_model=list[UserOut])
+def list_users(
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> list[UserOut]:
+    """List every account, oldest first (admin only, FR-21)."""
+    users = db.scalars(select(User).order_by(User.created_at, User.email))
+    return [UserOut.from_user(user) for user in users]
+
+
+@router.patch("/users/{user_id}", response_model=UserOut)
+def update_user(
+    user_id: uuid.UUID,
+    body: UpdateUserRequest,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> UserOut:
+    """Change another account's role or status (admin only, FR-21)."""
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    # Stops the last admin from locking everyone out by accident.
+    if user.user_id == admin.user_id and (body.role == "Trader" or body.status == "Disabled"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot demote or disable your own account",
+        )
+
+    if body.role is not None:
+        user.role = UserRole.ADMIN if body.role == "Admin" else UserRole.TRADER
+    if body.status is not None:
+        user.account_status = AccountStatus.ACTIVE if body.status == "Active" else AccountStatus.SUSPENDED
+
+    db.commit()
+    db.refresh(user)
+    return UserOut.from_user(user)
