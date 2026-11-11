@@ -8,14 +8,17 @@ from app.schemas.replay import (
     TradeOutcomeOut,
     UpdateSessionRequest,
 )
+from app.schemas.trading import CreateTradeRequest, TradeOut
 
 __all__ = [
     "CreateSessionRequest",
+    "CreateTradeRequest",
     "DatasetOut",
     "InstrumentOut",
     "PriceBarOut",
     "SessionOut",
     "StepSessionRequest",
     "TradeOutcomeOut",
+    "TradeOut",
     "UpdateSessionRequest",
 ]
