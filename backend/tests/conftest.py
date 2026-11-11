@@ -86,6 +86,18 @@ def user_2(db):
 
 
 @pytest.fixture
+def anon_client(db):
+    """TestClient with no Authorization header, backed by the test database."""
+
+    def override_get_db():
+        yield db
+
+    app.dependency_overrides[get_db] = override_get_db
+    yield TestClient(app)
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
 def client(db, user_1):
     """TestClient authenticated as user_1."""
     token = create_access_token(user_1.user_id)

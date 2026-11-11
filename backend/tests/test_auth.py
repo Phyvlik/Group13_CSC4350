@@ -1,27 +1,11 @@
 import jwt
-import pytest
-from fastapi.testclient import TestClient
 
 from app.core.config import get_settings
 from app.core.security import hash_password, verify_password
-from app.db.session import get_db
-from app.main import app
 from app.models.enums import AccountStatus
 from app.models.user import User
 
 PASSWORD = "correct-horse-1"
-
-
-@pytest.fixture
-def anon_client(db):
-    """TestClient with no Authorization header, backed by the test database."""
-
-    def override_get_db():
-        yield db
-
-    app.dependency_overrides[get_db] = override_get_db
-    yield TestClient(app)
-    app.dependency_overrides.clear()
 
 
 def register(client, email="ada@example.com", password=PASSWORD, display_name="Ada"):
