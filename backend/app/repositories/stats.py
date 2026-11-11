@@ -57,11 +57,6 @@ price_bars = table(
     column("bar_at", DateTime(timezone=True)),
     column("close_price", _amount),
 )
-users = table(
-    "users",
-    column("user_id", Uuid),
-    column("account_status", String),
-)
 
 
 class SessionNotFound(LookupError):
