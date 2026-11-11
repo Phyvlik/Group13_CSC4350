@@ -62,6 +62,8 @@ def get_current_user(
                 headers={"WWW-Authenticate": "Bearer"},
             )
     elif x_user_id:
+        # DEV ONLY: the X-User-Id header skips token checks so local tools can act as a user.
+        # Remove this fallback before release.
         try:
             user_id = uuid.UUID(x_user_id)
         except ValueError:
