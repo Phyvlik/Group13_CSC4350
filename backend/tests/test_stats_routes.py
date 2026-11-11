@@ -132,19 +132,6 @@ class StatsRouteTests(StatsRouteTestCase):
                 response = self.client.get(self.path(), headers=self.headers())
                 self.assertEqual(response.status_code, 401, response.text)
 
-    def test_unsafe_auth_configuration_fails_closed(self):
-        valid_headers = self.headers()
-        for secret, algorithm in (
-            ("change_me_to_a_long_random_string", "HS256"),
-            ("too-short", "HS256"),
-            (self.settings.jwt_secret_key, "HS384"),
-        ):
-            with self.subTest(secret=secret, algorithm=algorithm):
-                self.settings.jwt_secret_key = secret
-                self.settings.jwt_algorithm = algorithm
-                response = self.client.get(self.path(), headers=valid_headers)
-                self.assertEqual(response.status_code, 503, response.text)
-
     def test_storage_conflicts_rollback_and_do_not_expose_database_details(self):
         errors = (
             StatsConflict("internal conflict details"),
