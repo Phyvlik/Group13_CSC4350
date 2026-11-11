@@ -1,124 +1,111 @@
 /*
- * Placeholder accounts kept in localStorage so the pages can be navigated.
- * Replace with the real auth endpoints (#6): register, login, profile and the admin user list.
+ * Signed-in user state backed by the auth API: POST /auth/register, POST /auth/login, GET /auth/me, PATCH /auth/me.
+ * The access token is kept in localStorage and sent as a Bearer header by the api client.
  */
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { ApiError, getToken, http, setToken } from "./api/http";
 
 export interface User {
   id: string;
   name: string;
   email: string;
-  pass: string;
   role: "Trader" | "Admin";
   status: "Active" | "Disabled";
 }
 
-const USERS_KEY = "epoch.users";
-const UID_KEY = "epoch.uid";
-
-const SEED: User[] = [
-  { id: "u1", name: "Admin", email: "admin@epoch.test", pass: "admin-demo", role: "Admin", status: "Active" },
-  { id: "u2", name: "Demo Trader", email: "demo@epoch.test", pass: "demo-demo", role: "Trader", status: "Active" },
-];
-
-function readUsers(): User[] {
-  try {
-    const raw = JSON.parse(localStorage.getItem(USERS_KEY) ?? "null");
-    if (Array.isArray(raw) && raw.length) return raw as User[];
-  } catch {
-    /* fall through to the seed */
-  }
-  return SEED;
-}
-
-function readUid(): string | null {
-  try {
-    return localStorage.getItem(UID_KEY);
-  } catch {
-    return null;
-  }
+interface AuthResponse {
+  user: User;
+  access_token: string;
 }
 
 interface AuthValue {
   user: User | null;
-  users: User[];
-  signIn: (email: string, pass: string) => string | null;
-  signUp: (name: string, email: string, pass: string, pass2: string) => string | null;
+  /** False until a stored token has been checked against GET /auth/me. */
+  ready: boolean;
+  signIn: (email: string, pass: string) => Promise<string | null>;
+  signUp: (name: string, email: string, pass: string, pass2: string) => Promise<string | null>;
   signOut: () => void;
-  updateProfile: (name: string, email: string) => string | null;
-  saveUser: (id: string, role: User["role"], status: User["status"]) => string | null;
+  updateProfile: (name: string, email: string) => Promise<string | null>;
 }
 
 const AuthContext = createContext<AuthValue | null>(null);
 const EMAIL = /^\S+@\S+\.\S+$/;
 
+const problem = (x: unknown, fallback: string) => (x instanceof Error && x.message ? x.message : fallback);
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [users, setUsers] = useState<User[]>(readUsers);
-  const [uid, setUid] = useState<string | null>(readUid);
+  const [user, setUser] = useState<User | null>(null);
+  const [ready, setReady] = useState(() => !getToken());
 
-  const persist = useCallback((next: User[]) => {
-    setUsers(next);
-    try {
-      localStorage.setItem(USERS_KEY, JSON.stringify(next));
-    } catch {
-      /* storage unavailable */
-    }
+  useEffect(() => {
+    if (!getToken()) return;
+    let alive = true;
+    http
+      .get<User>("/auth/me")
+      .then((me) => alive && setUser(me))
+      .catch(() => {
+        // An expired or revoked token just means signing in again.
+        if (alive) setToken(null);
+      })
+      .finally(() => alive && setReady(true));
+    return () => {
+      alive = false;
+    };
   }, []);
 
-  const remember = useCallback((id: string | null) => {
-    setUid(id);
-    try {
-      if (id) localStorage.setItem(UID_KEY, id);
-      else localStorage.removeItem(UID_KEY);
-    } catch {
-      /* storage unavailable */
-    }
+  const accept = useCallback((res: AuthResponse) => {
+    setToken(res.access_token);
+    setUser(res.user);
   }, []);
-
-  const user = useMemo(() => users.find((u) => u.id === uid && u.status === "Active") ?? null, [users, uid]);
 
   const value = useMemo<AuthValue>(
     () => ({
       user,
-      users,
-      signIn(email, pass) {
+      ready,
+      async signIn(email, pass) {
         const e = email.trim().toLowerCase();
         if (!EMAIL.test(e)) return "Enter a valid email address.";
         if (!pass) return "Enter your password.";
-        const found = users.find((u) => u.email === e && u.pass === pass);
-        if (!found) return "Email or password is incorrect.";
-        if (found.status !== "Active") return "This account is disabled. Contact an admin.";
-        remember(found.id);
-        return null;
+        try {
+          accept(await http.post<AuthResponse>("/auth/login", { email: e, password: pass }));
+          return null;
+        } catch (x) {
+          // The API answers 401 for a wrong password and for a disabled account alike.
+          if (x instanceof ApiError && x.status === 401) return "Email or password is incorrect, or the account is disabled.";
+          return problem(x, "Could not sign in.");
+        }
       },
-      signUp(name, email, pass, pass2) {
+      async signUp(name, email, pass, pass2) {
         const e = email.trim().toLowerCase();
         if (!name.trim()) return "Enter a display name.";
         if (!EMAIL.test(e)) return "Enter a valid email address.";
         if (pass.length < 8) return "Use at least 8 characters for your password.";
         if (pass !== pass2) return "Passwords do not match.";
-        if (users.some((u) => u.email === e)) return "An account with this email already exists.";
-        const created: User = { id: "u" + Date.now(), name: name.trim(), email: e, pass, role: "Trader", status: "Active" };
-        persist([...users, created]);
-        remember(created.id);
-        return null;
+        try {
+          accept(await http.post<AuthResponse>("/auth/register", { email: e, password: pass, display_name: name.trim() }));
+          return null;
+        } catch (x) {
+          if (x instanceof ApiError && x.status === 409) return "An account with this email already exists.";
+          return problem(x, "Could not create the account.");
+        }
       },
-      signOut: () => remember(null),
-      updateProfile(name, email) {
-        const e = email.trim().toLowerCase();
+      signOut() {
+        setToken(null);
+        setUser(null);
+      },
+      async updateProfile(name, email) {
         if (!name.trim()) return "Enter a display name.";
-        if (!EMAIL.test(e)) return "Enter a valid email address.";
-        if (users.some((u) => u.email === e && u.id !== user?.id)) return "That email is already in use.";
-        persist(users.map((u) => (u.id === user?.id ? { ...u, name: name.trim(), email: e } : u)));
-        return null;
-      },
-      saveUser(id, role, status) {
-        if (id === user?.id && (role !== "Admin" || status !== "Active")) return "You cannot demote or disable your own account.";
-        persist(users.map((u) => (u.id === id ? { ...u, role, status } : u)));
-        return null;
+        // TODO: PATCH /auth/me does not accept an email change yet, so only the display name is saved.
+        if (email.trim().toLowerCase() !== user?.email) return "Changing your email is not supported yet.";
+        try {
+          setUser(await http.patch<User>("/auth/me", { display_name: name.trim() }));
+          return null;
+        } catch (x) {
+          return problem(x, "Could not save the profile.");
+        }
       },
     }),
-    [user, users, persist, remember],
+    [user, ready, accept],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

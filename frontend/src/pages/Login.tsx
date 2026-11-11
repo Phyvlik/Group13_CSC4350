@@ -45,13 +45,13 @@ export default function LoginPage({ mode }: { mode: "signin" | "signup" }) {
 
   if (user) return <Navigate to={user.role === "Admin" ? "/admin" : "/dashboard"} replace />;
 
-  const submit = (e: FormEvent<HTMLFormElement>) => {
+  const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
     const get = (k: string) => String(f.get(k) ?? "");
     const problem = signin
-      ? signIn(get("email"), get("pass"))
-      : signUp(get("name"), get("email"), get("pass"), get("pass2"));
+      ? await signIn(get("email"), get("pass"))
+      : await signUp(get("name"), get("email"), get("pass"), get("pass2"));
     if (problem) setError(problem);
     else navigate("/");
   };
@@ -105,7 +105,7 @@ export default function LoginPage({ mode }: { mode: "signin" | "signup" }) {
         </p>
         {signin && (
           <p className="hint" style={{ marginTop: 28 }}>
-            Placeholder logins: demo@epoch.test / demo-demo (trader), admin@epoch.test / admin-demo (admin).
+            Demo logins after running the seed script: demo@epoch.test / demo-password (trader), admin@epoch.test / admin-password (admin).
           </p>
         )}
       </section>

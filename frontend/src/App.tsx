@@ -14,7 +14,8 @@ import ReplayPage from "./pages/Replay";
 import StatsPage from "./pages/Stats";
 
 function Home() {
-  const { user } = useAuth();
+  const { user, ready } = useAuth();
+  if (!ready) return null;
   if (!user) return <Navigate to="/login" replace />;
   return <Navigate to={user.role === "Admin" ? "/admin" : "/dashboard"} replace />;
 }

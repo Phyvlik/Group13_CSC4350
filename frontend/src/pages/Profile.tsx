@@ -11,9 +11,9 @@ export default function ProfilePage() {
   const [email, setEmail] = useState(user?.email ?? "");
   const [error, setError] = useState("");
 
-  const submit = (e: FormEvent) => {
+  const submit = async (e: FormEvent) => {
     e.preventDefault();
-    const problem = updateProfile(name, email);
+    const problem = await updateProfile(name, email);
     setError(problem ?? "");
     if (!problem) toast("Profile saved.");
   };

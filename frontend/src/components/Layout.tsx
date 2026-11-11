@@ -1,5 +1,6 @@
 import { Link, NavLink, Navigate, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth";
+import { Loading } from "./State";
 import { useCursorFx } from "../hooks/useCursorFx";
 import { toggleTheme } from "../hooks/useTheme";
 
@@ -13,10 +14,11 @@ const traderLinks = [
 ];
 
 export default function Layout() {
-  const { user, signOut } = useAuth();
+  const { user, ready, signOut } = useAuth();
   const navigate = useNavigate();
   useCursorFx();
 
+  if (!ready) return <Loading />;
   if (!user) return <Navigate to="/login" replace />;
   const admin = user.role === "Admin";
 
