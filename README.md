@@ -172,7 +172,10 @@ Pick one:
 
 - **Real data from Twelve Data:** set `TWELVE_DATA_API_KEY` in `.env`, restart the backend, sign in as an admin, and call the import endpoint (Swagger at http://localhost:8000/docs works too):
   ```bash
-  curl -X POST http://localhost:8000/admin/market-data/import     -H "Authorization: Bearer <admin access_token>"     -H "Content-Type: application/json"     -d '{"symbol": "AAPL", "exchange": "NASDAQ", "interval": "1day", "start": "2023-01-02T00:00:00Z", "end": "2024-12-31T00:00:00Z"}'
+  curl -X POST http://localhost:8000/admin/market-data/import \
+    -H "Authorization: Bearer <admin access_token>" \
+    -H "Content-Type: application/json" \
+    -d '{"symbol": "AAPL", "exchange": "NASDAQ", "interval": "1day", "start": "2023-01-02T00:00:00Z", "end": "2024-12-31T00:00:00Z"}'
   ```
   Ranges over 5000 bars are fetched in several requests automatically. The frontend chart works best with `1day` data.
 
@@ -185,7 +188,7 @@ Backend (uses an in-memory SQLite database, no Postgres needed):
 ```bash
 cd backend
 python -m venv .venv
-source .venv/bin/activate    # Windows: .venv\Scriptsctivate
+source .venv/bin/activate    # Windows: .venv\Scripts\activate
 pip install -r requirements-dev.txt
 pytest
 ```
