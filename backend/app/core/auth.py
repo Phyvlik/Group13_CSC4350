@@ -49,6 +49,7 @@ def get_current_user(
             auth.credentials,
             settings.jwt_secret_key,
             algorithms=[settings.jwt_algorithm],
+            options={"require": ["exp", "sub"]},
         )
         sub = payload.get("sub")
         if not sub:
