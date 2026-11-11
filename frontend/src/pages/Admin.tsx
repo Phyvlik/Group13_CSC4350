@@ -1,16 +1,18 @@
 import { useState, type FormEvent } from "react";
 import { Navigate } from "react-router-dom";
 import { api } from "../api/client";
-import { useAuth, type User } from "../auth";
+import type { AdminUser as User } from "../api/types";
+import { useAuth } from "../auth";
 import { ErrorPanel, Loading, PageHead } from "../components/State";
 import { useToast } from "../components/Toasts";
 import { useLoad } from "../hooks/useLoad";
 
 export default function AdminPage() {
-  const { user, users, saveUser } = useAuth();
+  const { user } = useAuth();
   const toast = useToast();
   const datasets = useLoad(() => api.datasets(), []);
   const usage = useLoad(() => api.usage(), []);
+  const accounts = useLoad(() => api.users(), []);
   const [find, setFind] = useState("");
   const [pick, setPick] = useState<string | null>(null);
   const [role, setRole] = useState<User["role"]>("Trader");
@@ -21,8 +23,10 @@ export default function AdminPage() {
   const [dataError, setDataError] = useState("");
 
   if (user?.role !== "Admin") return <Navigate to="/dashboard" replace />;
-  if (datasets.error || usage.error) return <ErrorPanel message={datasets.error ?? usage.error ?? ""} />;
-  if (!datasets.data || !usage.data) return <Loading />;
+  if (datasets.error || usage.error || accounts.error)
+    return <ErrorPanel message={datasets.error ?? usage.error ?? accounts.error ?? ""} />;
+  if (!datasets.data || !usage.data || !accounts.data) return <Loading />;
+  const users = accounts.data;
 
   const f = find.toLowerCase();
   const shown = users.filter((u) => !f || (u.email + u.name).toLowerCase().includes(f));
@@ -34,12 +38,18 @@ export default function AdminPage() {
     setUserError("");
   };
 
-  const submitUser = (e: FormEvent) => {
+  const submitUser = async (e: FormEvent) => {
     e.preventDefault();
     if (!pick) return;
-    const problem = saveUser(pick, role, status);
-    setUserError(problem ?? "");
-    if (!problem) toast("User saved.");
+    if (pick === user.id && (role !== "Admin" || status !== "Active")) return setUserError("You cannot demote or disable your own account.");
+    try {
+      const saved = await api.updateUser(pick, role, status);
+      accounts.setData(users.map((u) => (u.id === saved.id ? saved : u)));
+      setUserError("");
+      toast("User saved.");
+    } catch (x) {
+      setUserError(x instanceof Error ? x.message : "Could not save the user.");
+    }
   };
 
   const submitData = async (e: FormEvent) => {
@@ -72,7 +82,7 @@ export default function AdminPage() {
             <div className="field">
               <label htmlFor="di">Instrument</label>
               <input id="di" list="dl" placeholder="Select or type a symbol" value={symbol} onChange={(e) => setSymbol(e.target.value)} />
-              <datalist id="dl">{datasets.data.map((d) => <option key={d.sym} value={d.sym} />)}</datalist>
+              <datalist id="dl">{[...new Set(datasets.data.map((d) => d.sym))].map((sym) => <option key={sym} value={sym} />)}</datalist>
             </div>
             <div className="field">
               <label htmlFor="dfile">Dataset file</label>
@@ -84,7 +94,7 @@ export default function AdminPage() {
           </form>
           <div className="divide" style={{ marginTop: 24 }}>
             {datasets.data.map((d) => (
-              <div key={d.sym} style={{ padding: "12px 0" }}>
+              <div key={d.id} style={{ padding: "12px 0" }}>
                 <b>{d.sym}</b> <span className="muted mono">1D / {d.range}</span> <span className="tag">{d.status}</span>
               </div>
             ))}
