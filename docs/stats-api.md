@@ -15,17 +15,16 @@ planned `docs/api.md` before frontend integration.
 
 ## Authentication and ownership
 
-Every route requires `Authorization: Bearer <access-token>`. Tokens must use
-HS256, have an unexpired `exp`, and have a UUID user ID in `sub`. The user must
-exist with `account_status = ACTIVE`. Configure `JWT_ALGORITHM=HS256` and a
-random `JWT_SECRET_KEY` of at least 32 bytes; the template secret is rejected.
-Do not commit the secret. This feature verifies tokens but does not provide
-registration, login, password handling, or token issuance.
+Every route requires `Authorization: Bearer <access-token>` and uses the shared
+`get_current_user` dependency in `app/core/auth.py`, the same one as the rest of
+the API. Get a token from `POST /auth/login` or `POST /auth/register`. Tokens
+must be unexpired, carry `exp`, and have a UUID user ID in `sub`; the user must
+exist with `account_status = ACTIVE`. Set a random `JWT_SECRET_KEY` in `.env` and
+do not commit it.
 
-The authenticated token supplies the user ID. There is no user selector or
-`X-User-Id` development bypass. Requests for another user's session have the
-same 404 response as a nonexistent session. The isolated `stats_auth.py`
-dependency should be consolidated with the shared auth service when it lands.
+The authenticated token supplies the user ID. There is no user selector and no
+`X-User-Id` header bypass. Requests for another user's session have the
+same 404 response as a nonexistent session.
 
 ## Saved session statistics
 
@@ -134,7 +133,7 @@ price values are returned by these endpoints.
 | 404 | Session absent or owned by another user |
 | 409 | No verified snapshot, invalid source data, or computation/storage conflict |
 | 422 | Invalid UUID path parameter |
-| 503 | Unsafe token-verification settings or unavailable/unmigrated database |
+| 503 | Unavailable or unmigrated database |
 
 Errors expose short messages, not tokens, SQL statements, or driver details.
 There is no automatic retry for a failed POST: the caller can explicitly retry
