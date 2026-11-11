@@ -65,23 +65,7 @@ def _parse_bar(row: dict) -> Bar:
         raise TwelveDataError(f"Unexpected bar format from Twelve Data: {row!r}") from exc
 
 
-def fetch_time_series(symbol: str, exchange: str, interval: str, start: datetime, end: datetime) -> TimeSeries:
-    """Fetch bars for [start, end] in UTC, oldest first."""
-    api_key = get_settings().twelve_data_api_key
-    if not api_key:
-        raise TwelveDataNotConfigured("TWELVE_DATA_API_KEY is not set")
-
-    params = {
-        "symbol": symbol,
-        "exchange": exchange,
-        "interval": interval,
-        "start_date": _to_utc(start).strftime(_DATETIME_FORMAT),
-        "end_date": _to_utc(end).strftime(_DATETIME_FORMAT),
-        "timezone": "UTC",
-        "order": "ASC",
-        "outputsize": MAX_OUTPUT_SIZE,
-        "apikey": api_key,
-    }
+def _fetch_chunk(params: dict) -> tuple[str | None, list[Bar]]:
     try:
         with _client() as client:
             response = client.get("/time_series", params=params)
@@ -95,4 +79,43 @@ def fetch_time_series(symbol: str, exchange: str, interval: str, start: datetime
 
     meta = payload.get("meta") or {}
     bars = sorted((_parse_bar(row) for row in payload.get("values") or []), key=lambda bar: bar.bar_at)
-    return TimeSeries(currency=meta.get("currency"), bars=bars)
+    return meta.get("currency"), bars
+
+
+def fetch_time_series(symbol: str, exchange: str, interval: str, start: datetime, end: datetime) -> TimeSeries:
+    """Fetch bars for [start, end] in UTC, oldest first.
+
+    Twelve Data caps each response at MAX_OUTPUT_SIZE bars, so a full response means there may be more:
+    the next request starts at the last bar received, and bars are de-duplicated by timestamp.
+    """
+    api_key = get_settings().twelve_data_api_key
+    if not api_key:
+        raise TwelveDataNotConfigured("TWELVE_DATA_API_KEY is not set")
+
+    end_utc = _to_utc(end)
+    cursor = _to_utc(start)
+    currency: str | None = None
+    by_time: dict[datetime, Bar] = {}
+    while True:
+        params = {
+            "symbol": symbol,
+            "exchange": exchange,
+            "interval": interval,
+            "start_date": cursor.strftime(_DATETIME_FORMAT),
+            "end_date": end_utc.strftime(_DATETIME_FORMAT),
+            "timezone": "UTC",
+            "order": "ASC",
+            "outputsize": MAX_OUTPUT_SIZE,
+            "apikey": api_key,
+        }
+        chunk_currency, bars = _fetch_chunk(params)
+        currency = currency or chunk_currency
+        for bar in bars:
+            by_time.setdefault(bar.bar_at, bar)
+
+        # A short chunk is the last one. Stop too if the provider made no progress, so we never loop forever.
+        if len(bars) < MAX_OUTPUT_SIZE or bars[-1].bar_at <= cursor or bars[-1].bar_at >= end_utc:
+            break
+        cursor = bars[-1].bar_at
+
+    return TimeSeries(currency=currency, bars=sorted(by_time.values(), key=lambda bar: bar.bar_at))
