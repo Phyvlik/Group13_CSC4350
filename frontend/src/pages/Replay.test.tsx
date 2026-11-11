@@ -1,9 +1,10 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api/client";
 import { MOCK_BARS } from "../api/mockBars";
+import type { ReplayState } from "../api/types";
 import { ToastProvider } from "../components/Toasts";
 import ReplayPage from "./Replay";
 
@@ -29,6 +30,25 @@ function renderReplay() {
   return screen.findByTestId("chart");
 }
 
+// The api client talks to the backend, so these tests stand in for it with a replay over the fixed bars.
+let revealed = 40;
+const fakeState = (): ReplayState => ({
+  session: { id: "s3", sym: "TSLA", start: MOCK_BARS[0].time, end: MOCK_BARS[MOCK_BARS.length - 1].time, status: "In progress" },
+  bars: MOCK_BARS.slice(0, revealed),
+  remaining: MOCK_BARS.length - revealed,
+  account: { cash: 10000, position: 0, equity: 10000 },
+});
+
+beforeEach(() => {
+  revealed = 40;
+  vi.spyOn(api, "replay").mockImplementation(async () => fakeState());
+  vi.spyOn(api, "reveal").mockImplementation(async (_id, n) => {
+    revealed = Math.min(MOCK_BARS.length, revealed + n);
+    return fakeState();
+  });
+  vi.spyOn(api, "placeTrade").mockImplementation(async () => ({ trade: { id: "T-0099" }, account: fakeState().account }));
+});
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -36,7 +56,7 @@ afterEach(() => {
 
 describe("practice replay page", () => {
   it("only gives the chart bars up to the replay point", async () => {
-    const { bars, remaining } = await api.createSession({ sym: "TSLA", start: "2026-01-05", end: "2026-04-30" }).then(() => api.replay("s3"));
+    const { bars, remaining } = await api.replay("s3");
     await renderReplay();
 
     expect(chartBars.latest).toHaveLength(bars.length);
@@ -47,7 +67,6 @@ describe("practice replay page", () => {
   });
 
   it("adds one more bar when Reveal next bar is clicked", async () => {
-    await api.createSession({ sym: "TSLA", start: "2026-01-05", end: "2026-04-30" });
     await renderReplay();
     const before = chartBars.latest.length;
 
