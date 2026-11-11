@@ -1,15 +1,18 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.permissions import require_admin
 from app.db.session import get_db
 from app.models.enums import AccountStatus, UserRole
+from app.models.instrument import Instrument
+from app.models.market_data import MarketDataset, PriceBar
+from app.models.practice import PracticeSession
 from app.models.user import User
-from app.schemas.admin import UpdateUserRequest
+from app.schemas.admin import AdminDatasetOut, UpdateUserRequest
 from app.schemas.auth import UserOut
 from app.schemas.market_data import MarketDataImportRequest, MarketDataImportResponse
 from app.services.market_data_import import NoBarsReturned, import_market_data
@@ -85,3 +88,78 @@ def update_user(
     db.commit()
     db.refresh(user)
     return UserOut.from_user(user)
+
+
+@router.get("/datasets", response_model=list[AdminDatasetOut])
+def list_datasets(
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> list[AdminDatasetOut]:
+    """List stored datasets with bar and session counts, newest import first (admin only, FR-20)."""
+    bar_counts = (
+        select(PriceBar.dataset_id, func.count().label("bar_count")).group_by(PriceBar.dataset_id).subquery()
+    )
+    session_counts = (
+        select(PracticeSession.dataset_id, func.count().label("session_count"))
+        .group_by(PracticeSession.dataset_id)
+        .subquery()
+    )
+    rows = db.execute(
+        select(
+            MarketDataset,
+            Instrument,
+            func.coalesce(bar_counts.c.bar_count, 0),
+            func.coalesce(session_counts.c.session_count, 0),
+        )
+        .join(Instrument, Instrument.instrument_id == MarketDataset.instrument_id)
+        .outerjoin(bar_counts, bar_counts.c.dataset_id == MarketDataset.dataset_id)
+        .outerjoin(session_counts, session_counts.c.dataset_id == MarketDataset.dataset_id)
+        .order_by(MarketDataset.imported_at.desc(), Instrument.symbol)
+    ).all()
+    return [
+        AdminDatasetOut(
+            dataset_id=dataset.dataset_id,
+            instrument_id=instrument.instrument_id,
+            symbol=instrument.symbol,
+            exchange=instrument.exchange,
+            provider=dataset.provider,
+            interval=dataset.interval,
+            version=dataset.version,
+            range_start=dataset.range_start,
+            range_end=dataset.range_end,
+            imported_at=dataset.imported_at,
+            bar_count=bar_count,
+            session_count=session_count,
+        )
+        for dataset, instrument, bar_count, session_count in rows
+    ]
+
+
+@router.delete("/datasets/{dataset_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_dataset(
+    dataset_id: uuid.UUID,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> Response:
+    """Delete a dataset and its bars. Blocked with 409 while any practice session uses it (admin only, FR-20)."""
+    dataset = db.get(MarketDataset, dataset_id)
+    if dataset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+
+    in_use = db.scalar(select(func.count()).where(PracticeSession.dataset_id == dataset_id))
+    if in_use:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Dataset is used by {in_use} practice session(s) and cannot be deleted",
+        )
+
+    # The database cascades bars too, but deleting them here keeps SQLite (no FK enforcement) consistent.
+    db.execute(delete(PriceBar).where(PriceBar.dataset_id == dataset_id))
+    db.delete(dataset)
+    try:
+        db.commit()
+    except IntegrityError:
+        # A session started on this dataset between the check and the delete.
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Dataset is in use and cannot be deleted")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
