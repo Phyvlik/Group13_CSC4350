@@ -1,8 +1,12 @@
 from decimal import Decimal
 import uuid
 
+import pytest
+from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.models.enums import SessionStatus, TradeSide
-from app.models.practice import PracticeSession
+from app.models.practice import PracticeSession, Trade
 
 
 def test_buy_orders_atomic_updates_and_rejections(db, client, client_user_2, sample_dataset):
@@ -196,3 +200,42 @@ def test_sell_orders_realized_pnl_and_rejections(db, client, client_user_2, samp
 
     # 6. Scoping: User 2 cannot list User 1's trades
     assert client_user_2.get(f"/sessions/{session_id}/trades").status_code == 404
+
+
+def test_forced_failure_mid_trade_leaves_state_unchanged(db, client, sample_dataset, monkeypatch):
+    """A commit failure mid-transaction rolls back cash, position, and the trade row (NFR-8)."""
+    session_res = client.post(
+        "/sessions",
+        json={
+            "dataset_id": str(sample_dataset.dataset_id),
+            "period_start": "2024-01-01T10:00:00Z",
+            "period_end": "2024-01-01T10:05:00Z",
+            "initial_cash": 10000,
+        },
+    )
+    assert session_res.status_code == 201
+    session_id = session_res.json()["session_id"]
+
+    # Force the commit inside place_trade to fail after the balance update
+    def fail_commit(self):
+        raise SQLAlchemyError("forced commit failure")
+
+    monkeypatch.setattr(db.__class__, "commit", fail_commit)
+
+    with pytest.raises(SQLAlchemyError):
+        client.post(
+            f"/sessions/{session_id}/trades",
+            json={"side": "BUY", "quantity": 10, "fee": 0},
+        )
+
+    db.rollback()
+
+    # Cash, position, and the trades table are all untouched
+    sess = db.get(PracticeSession, uuid.UUID(session_id))
+    assert sess.cash_balance == Decimal("10000")
+    assert sess.position_quantity == Decimal("0")
+    assert sess.average_cost == Decimal("0")
+    remaining = db.scalars(
+        select(Trade).where(Trade.session_id == uuid.UUID(session_id))
+    ).all()
+    assert remaining == []
