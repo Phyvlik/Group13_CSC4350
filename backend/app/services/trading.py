@@ -6,10 +6,11 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.enums import SessionStatus, TradeSide
+from app.models.enums import TradeSide
 from app.models.market_data import PriceBar
-from app.models.practice import PracticeSession, Trade
+from app.models.practice import Trade
 from app.schemas.trading import CreateTradeRequest
+from app.services.replay import ENDED_STATUSES, ReplayService, dataset_bars
 
 
 class TradingService:
@@ -24,47 +25,26 @@ class TradingService:
     ) -> Trade:
         """Place simulated BUY or SELL order with atomic cash/position update (FR-6, FR-7, NFR-8)."""
         # Session row locked using SELECT ... FOR UPDATE (FR-7, NFR-8)
-        stmt = (
-            select(PracticeSession)
-            .where(PracticeSession.session_id == session_id)
-            .with_for_update()
+        session = ReplayService.get_session(
+            db=db,
+            session_id=session_id,
+            user_id=user_id,
+            for_update=True,
         )
-        session = db.scalar(stmt)
-        if not session or session.user_id != user_id:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Session not found",
-            )
 
-        if session.status in (SessionStatus.COMPLETED, SessionStatus.ABANDONED):
+        if session.status in ENDED_STATUSES:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Cannot trade on an ended session",
             )
 
-        if payload.quantity <= Decimal("0"):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Order quantity must be greater than zero",
-            )
-
-        if payload.fee < Decimal("0"):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Trading fee cannot be negative",
-            )
-
         # Execution price is the close of the bar at replay_at (client cannot set price)
-        bar_stmt = (
-            select(PriceBar)
-            .where(
-                PriceBar.dataset_id == session.dataset_id,
-                PriceBar.bar_at <= session.replay_at,
-            )
+        current_bar = db.scalar(
+            dataset_bars(session.dataset_id)
+            .where(PriceBar.bar_at <= session.replay_at)
             .order_by(PriceBar.bar_at.desc())
             .limit(1)
         )
-        current_bar = db.scalar(bar_stmt)
         if not current_bar:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -127,7 +107,6 @@ class TradingService:
         db.add(trade)
         db.commit()
         db.refresh(trade)
-        db.refresh(session)
         return trade
 
     @staticmethod
@@ -137,17 +116,7 @@ class TradingService:
         user_id: uuid.UUID,
     ) -> Sequence[Trade]:
         """List trades for a session, owner only."""
-        session = db.scalar(
-            select(PracticeSession).where(
-                PracticeSession.session_id == session_id,
-                PracticeSession.user_id == user_id,
-            )
-        )
-        if not session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Session not found",
-            )
+        ReplayService.get_session(db=db, session_id=session_id, user_id=user_id)
 
         stmt = (
             select(Trade)
