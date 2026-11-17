@@ -25,6 +25,14 @@ def _to_utc(dt: datetime | None) -> datetime | None:
     return dt
 
 
+ENDED_STATUSES = (SessionStatus.COMPLETED, SessionStatus.ABANDONED)
+
+
+def dataset_bars(dataset_id: uuid.UUID):
+    """Base query for a dataset's price bars; callers add bounds and ordering."""
+    return select(PriceBar).where(PriceBar.dataset_id == dataset_id)
+
+
 class ReplayService:
     """Business logic for historical market replay sessions."""
 
@@ -59,12 +67,6 @@ class ReplayService:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="period_start must be earlier than period_end",
-            )
-
-        if payload.initial_cash <= Decimal("0"):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="initial_cash must be greater than zero",
             )
 
         session = PracticeSession(
@@ -114,15 +116,19 @@ class ReplayService:
         db: Session,
         session_id: uuid.UUID,
         user_id: uuid.UUID,
+        for_update: bool = False,
     ) -> PracticeSession:
         """Fetch session scoped to the logged-in user.
 
-        Another user's session returns 404.
+        Another user's session returns 404. Pass for_update=True to lock the
+        row with SELECT ... FOR UPDATE before mutating it (NFR-8).
         """
         stmt = select(PracticeSession).where(
             PracticeSession.session_id == session_id,
             PracticeSession.user_id == user_id,
         )
+        if for_update:
+            stmt = stmt.with_for_update()
         session = db.scalar(stmt)
         if not session:
             raise HTTPException(
@@ -141,11 +147,8 @@ class ReplayService:
         """Fetch price bars where bar_at <= replay_at executed at the SQL level (NFR-7)."""
         replay_at = _to_utc(session.replay_at)
         stmt = (
-            select(PriceBar)
-            .where(
-                PriceBar.dataset_id == session.dataset_id,
-                PriceBar.bar_at <= replay_at,
-            )
+            dataset_bars(session.dataset_id)
+            .where(PriceBar.bar_at <= replay_at)
             .order_by(PriceBar.bar_at.asc())
         )
         if start_at is not None:
@@ -162,25 +165,18 @@ class ReplayService:
         count: int = 1,
     ) -> PracticeSession:
         """Advance replay_at forward by N bars, never past period_end (FR-3)."""
-        if session.status in (SessionStatus.COMPLETED, SessionStatus.ABANDONED):
+        if session.status in ENDED_STATUSES:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Cannot step an ended session",
-            )
-
-        if count < 1:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Step count must be at least 1",
             )
 
         replay_at = _to_utc(session.replay_at)
         period_end = _to_utc(session.period_end)
 
         stmt = (
-            select(PriceBar)
+            dataset_bars(session.dataset_id)
             .where(
-                PriceBar.dataset_id == session.dataset_id,
                 PriceBar.bar_at > replay_at,
                 PriceBar.bar_at <= period_end,
             )
@@ -204,23 +200,18 @@ class ReplayService:
     ) -> PracticeSession:
         """Update session replay_speed, pause, or end (status, ended_at)."""
         if payload.replay_speed is not None:
-            if payload.replay_speed <= Decimal("0"):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="replay_speed must be greater than zero",
-                )
             session.replay_speed = payload.replay_speed
 
         if payload.status is not None:
             session.status = payload.status
-            if payload.status in (SessionStatus.COMPLETED, SessionStatus.ABANDONED):
-                if payload.ended_at is not None:
-                    session.ended_at = _to_utc(payload.ended_at)
-                elif session.ended_at is None:
-                    session.ended_at = datetime.now(timezone.utc)
-            elif payload.status in (SessionStatus.ACTIVE, SessionStatus.PAUSED):
-                if session.ended_at is not None and payload.status == SessionStatus.ACTIVE:
-                    session.ended_at = None
+            if payload.status in ENDED_STATUSES:
+                session.ended_at = (
+                    _to_utc(payload.ended_at)
+                    or session.ended_at
+                    or datetime.now(timezone.utc)
+                )
+            elif payload.status == SessionStatus.ACTIVE:
+                session.ended_at = None
 
         if payload.ended_at is not None:
             session.ended_at = _to_utc(payload.ended_at)
@@ -261,11 +252,8 @@ class ReplayService:
 
         placed_at = _to_utc(trade.placed_at)
         bar_stmt = (
-            select(PriceBar)
-            .where(
-                PriceBar.dataset_id == trade.session.dataset_id,
-                PriceBar.bar_at > placed_at,
-            )
+            dataset_bars(trade.session.dataset_id)
+            .where(PriceBar.bar_at > placed_at)
             .order_by(PriceBar.bar_at.asc())
             .limit(1)
         )
@@ -278,11 +266,11 @@ class ReplayService:
 
         next_price = next_bar.close_price if next_bar else None
         price_change = (next_bar.close_price - trade.execution_price) if next_bar else None
-        price_change_pct = None
-        if next_bar and trade.execution_price and trade.execution_price != Decimal("0"):
-            price_change_pct = (
-                (next_bar.close_price - trade.execution_price) / trade.execution_price
-            ) * Decimal("100")
+        price_change_pct = (
+            (price_change / trade.execution_price) * Decimal("100")
+            if next_bar and trade.execution_price
+            else None
+        )
 
         return TradeOutcomeOut(
             trade_id=trade.trade_id,

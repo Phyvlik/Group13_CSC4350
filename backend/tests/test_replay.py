@@ -232,6 +232,65 @@ def test_patch_session_speed_pausing_and_ending(client, sample_dataset):
     assert step_res.status_code == 400
 
 
+def test_patch_session_ended_at_transitions(client, sample_dataset):
+    """Characterization: PATCH /sessions/{id} status and ended_at interactions.
+
+    Documents current update_session semantics so refactors cannot change them:
+    - explicit ended_at alone auto-completes an ACTIVE session
+    - ended status uses the provided ended_at when given
+    - resuming (ACTIVE) clears ended_at
+    - ended_at with a non-ended status is stored as given
+    """
+    res = client.post(
+        "/sessions",
+        json={
+            "dataset_id": str(sample_dataset.dataset_id),
+            "period_start": "2024-01-01T10:00:00Z",
+            "period_end": "2024-01-01T10:05:00Z",
+            "initial_cash": 10000,
+        },
+    )
+    session_id = res.json()["session_id"]
+
+    # Explicit ended_at on an ACTIVE session auto-completes it
+    explicit_end = client.patch(
+        f"/sessions/{session_id}", json={"ended_at": "2024-01-01T10:04:00Z"}
+    )
+    assert explicit_end.status_code == 200
+    assert explicit_end.json()["status"] == "COMPLETED"
+    assert parser.isoparse(explicit_end.json()["ended_at"]) == datetime(
+        2024, 1, 1, 10, 4, 0, tzinfo=timezone.utc
+    )
+
+    # Resuming clears ended_at
+    resumed = client.patch(f"/sessions/{session_id}", json={"status": "ACTIVE"})
+    assert resumed.status_code == 200
+    assert resumed.json()["status"] == "ACTIVE"
+    assert resumed.json()["ended_at"] is None
+
+    # Ended status with explicit ended_at stores the provided value
+    end_ts = client.patch(
+        f"/sessions/{session_id}",
+        json={"status": "ABANDONED", "ended_at": "2024-01-01T10:03:00Z"},
+    )
+    assert end_ts.status_code == 200
+    assert end_ts.json()["status"] == "ABANDONED"
+    assert parser.isoparse(end_ts.json()["ended_at"]) == datetime(
+        2024, 1, 1, 10, 3, 0, tzinfo=timezone.utc
+    )
+
+    # PAUSED + ended_at stores the timestamp but keeps PAUSED status
+    paused_end = client.patch(
+        f"/sessions/{session_id}",
+        json={"status": "PAUSED", "ended_at": "2024-01-01T10:02:00Z"},
+    )
+    assert paused_end.status_code == 200
+    assert paused_end.json()["status"] == "PAUSED"
+    assert parser.isoparse(paused_end.json()["ended_at"]) == datetime(
+        2024, 1, 1, 10, 2, 0, tzinfo=timezone.utc
+    )
+
+
 def test_trade_outcome_requires_journal_entry(db, client, user_1, sample_dataset):
     """GET /trades/{id}/outcome returns next movement only if journaled, otherwise 409 (FR-4)."""
     # Create a practice session
