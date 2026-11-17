@@ -7,7 +7,7 @@ This document describes how our team works in this repository.
 1. `main` is protected. Nobody pushes directly to it, including admins.
 2. All work happens on a feature branch.
 3. Changes reach `main` only through a pull request.
-4. Every pull request needs **1 approving review** from a teammate before it can be merged.
+4. Every pull request needs **3 approving reviews** from teammates before it can be merged.
 5. If new commits are pushed after approval, the approval is dismissed and the PR needs to be reviewed again.
 
 ## Step by Step
@@ -75,13 +75,13 @@ In the PR description, include:
 
 ### 5. Review
 
-- Request a review from at least one teammate.
+- Request a review from all three teammates.
 - Reviewers should check that the code runs, follows our design rules (see the README), and does not break existing features.
 - Address feedback with new commits on the same branch.
 
 ### 6. Merge
 
-Once the PR has 1 approval and no unresolved comments, the author merges it into `main` and deletes the branch.
+Once the PR has 3 approvals and no unresolved comments, the author merges it into `main` and deletes the branch.
 
 ## Design Rules to Check in Review
 
