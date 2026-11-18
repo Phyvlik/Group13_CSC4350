@@ -48,7 +48,9 @@ Every feature branch is merged into `release/integration` and lands on `main` th
 | API contract and README status | `docs/api-contract` (#20), `docs/readme-status` (#14) | Vivek |
 | One shared auth, admin users and datasets, chunked import, demo seed, CI, frontend wired to the API | `release/integration` | Vivek |
 
-Not built yet (the frontend shows a clear TODO): saving trade reasoning to the journal (#11), behavior feedback (#13), and CSV dataset upload.
+The Feedback page analyzes a session, shows the trades behind a recurring pattern, and tracks a selected metric across sessions. See the [feedback API](docs/feedback-api.md).
+
+Saving trade reasoning to the journal (#11) and CSV dataset upload are still pending.
 
 ### Sprint 1: Done (by Vivek)
 

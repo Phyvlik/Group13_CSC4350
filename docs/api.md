@@ -624,8 +624,17 @@ Deletes a dataset and its bars (FR-20). Refused while any practice session uses 
 | POST | /sessions/{session_id}/stats/recompute | Bearer | feature/12-stats |
 | GET | /sessions/{session_id}/stats | Bearer | feature/12-stats |
 | GET | /stats/summary | Bearer | feature/12-stats |
+| GET | /sessions/{id}/feedback | Bearer | #13 |
+| POST | /sessions/{id}/feedback/recompute | Bearer | #13 |
+| GET | /habits | Bearer | #13 |
+| POST | /habits | Bearer | #13 |
+| GET | /habits/{metric_id}/history | Bearer | #13 |
 | POST | /admin/market-data/import | Bearer, admin | feature/7-market-data |
 | GET | /admin/users | Bearer, admin | release/integration |
 | PATCH | /admin/users/{id} | Bearer, admin | release/integration |
 | GET | /admin/datasets | Bearer, admin | release/integration |
 | DELETE | /admin/datasets/{id} | Bearer, admin | release/integration |
+
+## Feedback and habit tracking
+
+The [feedback API](feedback-api.md) documents the detection rule, evidence fields, habit selection, and history pagination.
