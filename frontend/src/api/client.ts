@@ -3,15 +3,15 @@
  * so the pages do not depend on backend field names. Nothing here calculates trading results.
  *
  * Still placeholder, because no backend endpoint exists yet (search for TODO):
- *   trade reasoning (journal entries), behavior feedback, and CSV dataset upload.
+ *   trade reasoning (journal entries) and CSV dataset upload.
  */
 import { http } from "./http";
+import type { FeedbackSnapshot, Habits, HabitHistory } from "./feedbackTypes";
 import { MOCK_BARS } from "./mockBars";
 import type {
   AdminUser,
   Bar,
   Dataset,
-  FeedbackData,
   Instrument,
   ReplayState,
   SessionRow,
@@ -261,30 +261,20 @@ export const api = {
     throw new Error("Saving reasoning is not available yet.");
   },
 
-  // TODO: behavior feedback has no backend endpoint yet; this is fixed placeholder content.
-  feedback: async (): Promise<FeedbackData> => ({
-    patterns: [
-      {
-        title: "Example pattern",
-        explanation: "The backend will write this text from verified statistics.",
-        tradeIds: [],
-        evidence: "Placeholder until the feedback endpoint exists.",
-      },
-    ],
-    metrics: [
-      { key: "win", label: "Win rate" },
-      { key: "size", label: "Average position size" },
-      { key: "count", label: "Trades per session" },
-      { key: "reason", label: "Reasoning length" },
-      { key: "exposure", label: "Peak exposure" },
-    ],
-    tracked: "",
-    trend: [],
-  }),
-  saveTracked: async (_key: string): Promise<{ key: string }> => {
-    // TODO: no tracked habit endpoint exists yet.
-    throw new Error("Tracking a metric is not available yet.");
+  feedbackSessions: async (all = false) => {
+    const sessions = await http.get<SessionOut[]>(all ? "/sessions" : "/sessions?limit=100");
+    return sessions.map((s) => ({
+      id: s.session_id,
+      label: `${day(s.period_start)} to ${day(s.period_end)} · ${s.session_id.slice(0, 8)} · ${s.status.toLowerCase()}`,
+    }));
   },
+  feedback: (id: string) => http.get<FeedbackSnapshot>(`/sessions/${encodeURIComponent(id)}/feedback`),
+  recomputeFeedback: (id: string) => http.post<FeedbackSnapshot>(`/sessions/${encodeURIComponent(id)}/feedback/recompute`),
+  habits: () => http.get<Habits>("/habits"),
+  saveTracked: (metricId: string, active = true) =>
+    http.post<Habits>("/habits", { metric_id: metricId, active }),
+  habitHistory: (metricId: string, offset = 0) =>
+    http.get<HabitHistory>(`/habits/${encodeURIComponent(metricId)}/history?limit=20&offset=${offset}`),
 
   datasets: async (): Promise<Dataset[]> => {
     const rows = await http.get<AdminDatasetOut[]>("/admin/datasets");

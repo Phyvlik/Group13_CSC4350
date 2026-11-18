@@ -40,3 +40,20 @@ class FeedbackEvidence(Base):
 
     feedback = relationship("Feedback", backref="evidence")
     session_metric = relationship("SessionMetric")
+
+
+class FeedbackAnalysis(Base):
+    """Saved evidence and input hash, including zero-event analyses."""
+
+    __tablename__ = "feedback_analyses"
+
+    analysis_id: Mapped[UuidPk]
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("practice_sessions.session_id", ondelete="CASCADE"), index=True
+    )
+    session_metric_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("session_metrics.session_metric_id", ondelete="CASCADE"), unique=True
+    )
+    analysis_version: Mapped[str] = mapped_column(String(20))
+    source_hash: Mapped[str] = mapped_column(String(64))
+    evidence_json: Mapped[str] = mapped_column(Text)

@@ -209,3 +209,19 @@ textarea { min-height: 112px; resize: vertical; line-height: 1.5; }
   .pattern dd { margin-bottom: 12px; }
   .chart-box { height: 300px; }
 }
+
+/* Feedback uses stored, verified snapshots; keep long evidence readable on small screens. */
+.feedback-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 18px 0; }
+.feedback-actions .hint { flex: 1; min-width: 180px; }
+.feedback-snapshot, .feedback-history, .feedback-rule { margin-top: 22px; }
+.feedback-pattern { margin-top: 24px; }
+.feedback-pattern > p, .feedback-evidence > p, .feedback-rule p { margin-top: 12px; }
+.feedback-evidence { margin-top: 18px; overflow-wrap: anywhere; }
+.feedback-evidence h3 { font-size: 14px; }
+.feedback-trades { padding-left: 20px; margin-top: 12px; }
+.feedback-trades li + li { margin-top: 8px; }
+.feedback-evidence blockquote { margin: 16px 0; padding: 12px; border-left: 2px solid var(--line); white-space: pre-wrap; }
+.feedback-rule summary { cursor: pointer; }
+.feedback-table-wrap { overflow-x: auto; margin-top: 16px; }
+.feedback-table-wrap caption { text-align: left; padding: 8px 0; }
+.feedback-table-wrap .table td, .feedback-table-wrap .table th { padding: 12px 8px; }
