@@ -63,20 +63,6 @@ export interface StatsData {
   summary: { endingCash?: number; openPosition?: string; status?: string; sessions?: number; openPositions?: number };
 }
 
-export interface FeedbackPattern {
-  title: string;
-  explanation: string;
-  tradeIds: string[];
-  evidence: string;
-}
-
-export interface FeedbackData {
-  patterns: FeedbackPattern[];
-  metrics: { key: string; label: string }[];
-  tracked: string;
-  trend: { label: string; value: string }[];
-}
-
 export interface Dataset {
   id: string;
   sym: string;
