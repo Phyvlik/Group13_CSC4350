@@ -74,6 +74,16 @@ def _rounded(value: Decimal | None) -> Decimal | None:
     return rounded
 
 
+def metric_definitions() -> list[dict]:
+    """Describe current versioned rules without reading or writing the database."""
+    return [
+        {"metric_id": METRIC_IDS[code], "code": code, "name": name, "unit": unit,
+         "calculation_rule": rule + " Values rounded to six decimals using ROUND_HALF_EVEN.",
+         "calculation_version": CALCULATION_VERSION}
+        for code, (name, unit, rule) in _RULES.items()
+    ]
+
+
 def seed_metric_definitions(db: Session) -> None:
     """Idempotent definitions keyed by deterministic code/version UUIDs.
 
@@ -84,12 +94,7 @@ def seed_metric_definitions(db: Session) -> None:
     insert = {"postgresql": pg_insert, "sqlite": sqlite_insert}.get(dialect)
     if insert is None:
         raise RuntimeError("Statistics storage supports PostgreSQL and SQLite only.")
-    for code, (name, unit, rule) in _RULES.items():
-        values = {
-            "metric_id": METRIC_IDS[code], "code": code, "name": name, "unit": unit,
-            "calculation_rule": rule + " Values rounded to six decimals using ROUND_HALF_EVEN.",
-            "calculation_version": CALCULATION_VERSION,
-        }
+    for values in metric_definitions():
         db.execute(insert(metrics).values(**values).on_conflict_do_nothing(index_elements=[metrics.c.metric_id]))
         existing = db.execute(select(metrics).where(metrics.c.metric_id == values["metric_id"])).mappings().one()
         if any(existing[key] != value for key, value in values.items()):
@@ -118,6 +123,7 @@ def recompute_session_stats(db: Session, user_id: UUID, session_id: UUID) -> dic
         seed_metric_definitions(db)
         revision = (db.scalar(select(func.max(session_metrics.c.revision)).where(
             session_metrics.c.session_id == session_id,
+            session_metrics.c.metric_id.in_(list(METRIC_IDS.values())),
         )) or 0) + 1
         computed_at = datetime.now(timezone.utc)
         values = _values(snapshot)
